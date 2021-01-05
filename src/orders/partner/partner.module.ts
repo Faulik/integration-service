@@ -1,7 +1,7 @@
 import { HttpModule, Module } from '@nestjs/common';
 import { PartnerOrdersService } from './orders/partner-orders.service';
 import { ConfigType } from '@nestjs/config';
-import { generalConfig } from '../configuration.providers';
+import { generalConfig } from '../../configuration.providers';
 
 @Module({
   imports: [
@@ -13,5 +13,6 @@ import { generalConfig } from '../configuration.providers';
     }),
   ],
   providers: [PartnerOrdersService],
+  exports: [PartnerOrdersService],
 })
 export class PartnerModule {}

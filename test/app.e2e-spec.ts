@@ -1,37 +1,35 @@
+import { HttpService, INestApplication } from '@nestjs/common';
+import { JobStatusClean, Queue } from 'bull';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { HttpService, INestApplication } from '@nestjs/common';
 import { MongoRepository } from 'typeorm';
-import * as request from 'supertest';
-
-import { AppModule } from '../src/app.module';
-import { Order } from '../src/api/orders/entities/order.entity';
 import { Observable, of } from 'rxjs';
 import { AxiosResponse } from 'axios';
-import { TigerModule } from '../src/tiger/tiger.module';
 import { getQueueToken } from '@nestjs/bull';
-import { JobStatusClean, Queue } from 'bull';
+import * as request from 'supertest';
 
-function makeMockTigerStatusResponse(
-  orderId: string,
-  status: 'Pending' | 'New' | 'InProduction' | 'Finished',
-): Observable<
-  AxiosResponse<{
-    OrderID: string;
-    Reason: number;
-    State: 'Pending' | 'New' | 'InProduction' | 'Finished';
-  }>
-> {
+import { OrdersProcessingModule } from '../src/orders/orders-processing.module';
+import { AppModule } from '../src/app.module';
+import { Order, OrderStatus } from '../src/orders/entities/order.entity';
+
+function makeMockTigerResponse<T>(data: T): Observable<AxiosResponse<T>> {
   return of({
     headers: {},
     config: { url: '' },
     status: 200,
     statusText: 'OK',
-    data: {
-      OrderID: orderId,
-      Reason: 1,
-      State: status,
-    },
+    data: data,
+  });
+}
+
+function makeMockTigerStatusResponse(
+  orderId: string,
+  status: 'Pending' | 'New' | 'InProduction' | 'Finished',
+) {
+  return makeMockTigerResponse({
+    OrderID: orderId,
+    Reason: 1,
+    State: status,
   });
 }
 
@@ -71,17 +69,15 @@ describe('AppController (e2e)', () => {
   let app: INestApplication;
 
   describe('/api/orders', () => {
-    const mockHttpService = {
-      get: jest.fn(),
-      post: jest.fn(),
-      put: jest.fn(),
-    };
+    let mockHttpService: HttpService;
 
     let moduleFixture: TestingModule;
     let ordersRepository: MongoRepository<Order>;
     let queue: Queue;
 
     beforeAll(async () => {
+      mockHttpService = new HttpService();
+
       moduleFixture = await Test.createTestingModule({
         imports: [AppModule],
       })
@@ -93,20 +89,19 @@ describe('AppController (e2e)', () => {
         getRepositoryToken(Order),
       );
 
-      queue = moduleFixture
-        .select(TigerModule)
-        .get<Queue>(getQueueToken('statusChecks'));
+      queue = moduleFixture.get<Queue>(getQueueToken('statusChecks'));
 
       app = moduleFixture.createNestApplication();
       await app.init();
     });
 
-    it('new order flow', async () => {
+    it('successful order flow', async () => {
       const mockOrder = makeMockOrder();
       const req = request(app.getHttpServer());
 
       const tigerHttpServiceGet = jest.spyOn(mockHttpService, 'get');
       const tigerHttpServicePost = jest.spyOn(mockHttpService, 'post');
+      const partnerHttpServicePatch = jest.spyOn(mockHttpService, 'patch');
 
       tigerHttpServiceGet.mockImplementationOnce(() =>
         makeMockTigerStatusResponse(String(mockOrder.id), 'Pending'),
@@ -118,36 +113,49 @@ describe('AppController (e2e)', () => {
         makeMockTigerStatusResponse(String(mockOrder.id), 'Finished'),
       );
 
-      tigerHttpServicePost.mockImplementation((url) =>
-        of({
-          headers: {},
-          config: { url: url },
-          status: 200,
-          statusText: 'OK',
-          data: undefined,
-        }),
+      tigerHttpServicePost.mockImplementationOnce(() =>
+        makeMockTigerResponse(undefined),
       );
 
-      const result1 = await req.post('/api/orders').send(mockOrder);
+      partnerHttpServicePatch.mockImplementationOnce(() =>
+        makeMockTigerResponse(undefined),
+      );
+
+      await req.post('/api/orders').send(mockOrder);
 
       const orders = await ordersRepository.find();
       expect(orders.length).toEqual(1);
+      expect(orders[0]).toMatchObject({
+        status: OrderStatus.new,
+        order: expect.objectContaining({
+          id: mockOrder.id,
+        }),
+      });
 
       expect(tigerHttpServicePost).toHaveBeenCalledTimes(1);
+      expect(tigerHttpServicePost).toHaveBeenCalledWith(
+        '/api/orders',
+        expect.objectContaining({ OrderID: String(mockOrder.id) }),
+      );
 
       expect(await queue.count()).toEqual(1);
       await runCheckJob(queue);
       await runCheckJob(queue);
       await runCheckJob(queue);
-
       expect(await queue.count()).toEqual(0);
 
       expect(tigerHttpServiceGet).toHaveBeenCalledTimes(3);
+      expect(tigerHttpServiceGet).toHaveBeenCalledWith(
+        `api/orders/${mockOrder.id}/state`,
+      );
 
-      expect(tigerHttpServicePost).toHaveBeenCalledWith('/api/orders');
-
-      console.log(result1.body);
-      expect(result1.body.status).toEqual(200);
+      expect(partnerHttpServicePatch).toHaveBeenCalledTimes(1);
+      expect(partnerHttpServicePatch).toHaveBeenCalledWith(
+        `api/orders/${mockOrder.id}`,
+        {
+          state: 'finished',
+        },
+      );
     });
 
     afterAll(async () => {

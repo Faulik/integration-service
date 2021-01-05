@@ -9,7 +9,7 @@ import { GeoService } from '../../utils/geo/geo.service';
 
 // Not sure how to make as a pipe in a sane way
 @Injectable()
-export class FromOrderService {
+export class TransformOrderService {
   constructor(
     @Inject(CarriersService) private carriersService: CarriersService,
     @Inject(GeoService) private geoService: GeoService,

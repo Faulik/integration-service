@@ -1,14 +1,11 @@
 import { HttpModule, Module } from '@nestjs/common';
-
-import { TigerOrderService } from './orders/tiger-order.service';
-import { FromOrderService } from './orders/from-order.service';
-import { CarriersService } from './orders/carriers/carriers.service';
-import { GeoService } from '../utils/geo/geo.service';
-import { BullModule } from '@nestjs/bull';
 import { ConfigType } from '@nestjs/config';
+
+import { TransformOrderService } from './orders/transform-order.service';
+import { TigerOrderService } from './orders/tiger-order.service';
+import { CarriersService } from './orders/carriers/carriers.service';
 import { generalConfig } from '../configuration.providers';
-import { PartnerModule } from '../partner/partner.module';
-import { OrderCheckProcessor } from './orders/order-check.processor';
+import { GeoService } from '../utils/geo/geo.service';
 
 @Module({
   imports: [
@@ -18,16 +15,10 @@ import { OrderCheckProcessor } from './orders/order-check.processor';
       }),
       inject: [generalConfig.KEY],
     }),
-    BullModule.registerQueue({
-      name: 'statusChecks',
-    }),
-    PartnerModule,
   ],
   providers: [
-    OrderCheckProcessor,
+    TransformOrderService,
     TigerOrderService,
-    CarriersService,
-    FromOrderService,
     CarriersService,
     GeoService,
   ],
