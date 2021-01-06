@@ -1,4 +1,4 @@
-import { Column, Entity, ObjectIdColumn } from 'typeorm';
+import { Column, Entity, Index, ObjectIdColumn } from 'typeorm';
 
 @Entity()
 class OrderDetails {
@@ -20,6 +20,7 @@ class OrderDetails {
 
 @Entity()
 class OrderInformation {
+  @Index('unique_order_ids', { unique: true })
   @Column()
   id: number;
 

@@ -36,8 +36,13 @@ export class OrdersProcessingService {
       throw new Error('Failed to save order');
     }
 
-    this.logger.log('Issuing new order', `orderId: ${newOrder.id}`);
-    await this.tigerOrderService.issueNewOrder(newOrder);
+    try {
+      this.logger.log('Issuing new order', `orderId: ${newOrder.id}`);
+      await this.tigerOrderService.issueNewOrder(newOrder);
+    } catch (e) {
+      await this.flagOrderAsFailed(String(newOrder.id));
+      throw e;
+    }
 
     this.logger.log('Adding new check order job', `orderId: ${newOrder.id}`);
     await this.orderChecksQueue.add(
@@ -60,13 +65,17 @@ export class OrdersProcessingService {
   async checkOrderStatus(orderId: string) {
     this.logger.log('Checking order status', `orderId: ${orderId}`);
 
-    const { data } = await this.tigerOrderService.checkOrderStatus(orderId);
-
-    this.logger.log(
-      `Got new order status ${data.State}`,
-      `orderId: ${orderId}`,
-    );
-    return data;
+    try {
+      const { data } = await this.tigerOrderService.checkOrderStatus(orderId);
+      this.logger.log(
+        `Got new order status ${data.State}`,
+        `orderId: ${orderId}`,
+      );
+      return data;
+    } catch (e) {
+      await this.flagOrderAsFailed(orderId);
+      throw e;
+    }
   }
 
   async submitFinishedOrder(orderId: string) {
@@ -95,7 +104,12 @@ export class OrdersProcessingService {
   async submitDeliveredOrder(orderId: string) {
     this.logger.log('Submitting order back to partner', `orderId: ${orderId}`);
 
-    await this.partnerOrdersService.updateOrderStatus(orderId, 'finished');
+    try {
+      await this.partnerOrdersService.updateOrderStatus(orderId, 'finished');
+    } catch (e) {
+      await this.flagOrderAsFailed(orderId);
+      throw e;
+    }
 
     await this.ordersRepository.updateOne(
       {
@@ -104,6 +118,21 @@ export class OrdersProcessingService {
       {
         $set: {
           status: OrderStatus.delivered,
+        },
+      },
+    );
+  }
+
+  async flagOrderAsFailed(orderId: string) {
+    this.logger.log('Flagging order as failed', `orderId: ${orderId}`);
+
+    await this.ordersRepository.updateOne(
+      {
+        'order.id': orderId,
+      },
+      {
+        $set: {
+          status: OrderStatus.failed,
         },
       },
     );

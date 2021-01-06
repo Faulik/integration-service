@@ -1,4 +1,4 @@
-import { HttpService, Inject, Injectable } from '@nestjs/common';
+import { HttpService, Inject, Injectable, Logger } from '@nestjs/common';
 import { CreateOrderDto } from '../../api/orders/dto/create-order.dto';
 import { TransformOrderService } from './transform-order.service';
 import { GeneralConfig } from '../../configuration.providers';
@@ -6,6 +6,8 @@ import { ConfigType } from '@nestjs/config';
 
 @Injectable()
 export class TigerOrderService {
+  private readonly logger = new Logger(TigerOrderService.name);
+
   constructor(
     @Inject(HttpService) private httpService: HttpService,
     @Inject(TransformOrderService)
@@ -17,23 +19,20 @@ export class TigerOrderService {
   async issueNewOrder(order: CreateOrderDto) {
     const transformedOrder = await this.fromOrderService.transform(order);
 
-    try {
-      const result = await this.httpService
-        .post<undefined>('/api/orders', transformedOrder)
-        .toPromise();
+    const result = await this.httpService
+      .post<undefined>('/api/orders', transformedOrder)
+      .toPromise();
 
-      if (result.status !== 200) {
-        throw new Error('Failed to submit order');
-      }
-    } catch (e) {
-      console.error(e);
-      throw e;
+    if (result.status !== 200) {
+      throw new Error(`Failed to submit order, error: ${result.data}`);
     }
+
+    return result;
   }
 
   async checkOrderStatus(orderId: string) {
     // We are loosing preconfigured httpService somehow on first request so we use injected config
-    return this.httpService
+    const result = await this.httpService
       .get<{
         OrderID: string;
         Reason: number;
@@ -45,5 +44,11 @@ export class TigerOrderService {
         },
       })
       .toPromise();
+
+    if (result.status !== 200) {
+      throw new Error(`Failed to submit order, error: ${result.data}`);
+    }
+
+    return result;
   }
 }
