@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { MongoRepository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bull';
@@ -11,6 +11,8 @@ import { CreateOrderDto } from '../../api/orders/dto/create-order.dto';
 
 @Injectable()
 export class OrdersProcessingService {
+  private readonly logger = new Logger(OrdersProcessingService.name);
+
   constructor(
     @InjectQueue('orderChecks') private orderChecksQueue: Queue,
     @InjectQueue('orderDelivery') private orderDeliveryQueue: Queue,
@@ -34,16 +36,18 @@ export class OrdersProcessingService {
       throw new Error('Failed to save order');
     }
 
+    this.logger.log('Issuing new order', `orderId: ${newOrder.id}`);
     await this.tigerOrderService.issueNewOrder(newOrder);
 
+    this.logger.log('Adding new check order job', `orderId: ${newOrder.id}`);
     await this.orderChecksQueue.add(
       {
         orderId: newOrder.id,
       },
       {
-        delay: 1000 * 60 * 2,
+        delay: 1000 * 60,
         repeat: {
-          every: 1000 * 60 * 2,
+          every: 1000 * 60,
         },
         removeOnComplete: true,
         jobId: `order_${newOrder.id}`,
@@ -54,17 +58,24 @@ export class OrdersProcessingService {
   }
 
   async checkOrderStatus(orderId: string) {
+    this.logger.log('Checking order status', `orderId: ${orderId}`);
+
     const { data } = await this.tigerOrderService.checkOrderStatus(orderId);
 
+    this.logger.log(
+      `Got new order status ${data.State}`,
+      `orderId: ${orderId}`,
+    );
     return data;
   }
 
   async submitFinishedOrder(orderId: string) {
     await this.orderChecksQueue.removeRepeatable({
-      every: 1000 * 60 * 2,
+      every: 1000 * 60,
       jobId: `order_${orderId}`,
     });
 
+    this.logger.log('Adding order to be delivered', `orderId: ${orderId}`);
     await this.orderDeliveryQueue.add({
       orderId: orderId,
     });
@@ -82,6 +93,8 @@ export class OrdersProcessingService {
   }
 
   async submitDeliveredOrder(orderId: string) {
+    this.logger.log('Submitting order back to partner', `orderId: ${orderId}`);
+
     await this.partnerOrdersService.updateOrderStatus(orderId, 'finished');
 
     await this.ordersRepository.updateOne(
