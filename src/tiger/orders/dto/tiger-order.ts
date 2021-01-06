@@ -4,6 +4,7 @@ import {
   IsArray,
   IsNumber,
   IsBoolean,
+  IsOptional,
   IsDateString,
   ValidateNested,
   IsISO31661Alpha2,
@@ -13,13 +14,15 @@ class TigerOrderShippingDeliveryAddress {
   @IsString()
   AddressLine1: string; // required
 
-  @IsString({ always: false })
+  @IsOptional()
+  @IsString()
   AddressLine2: string; // optional
 
   @IsString()
   City: string; // required
 
-  @IsString({ always: false })
+  @IsOptional()
+  @IsString()
   Company: string; // optional
 
   @IsString()
