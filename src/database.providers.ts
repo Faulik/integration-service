@@ -15,6 +15,7 @@ export const databaseProviders: DynamicModule[] = [
       autoLoadEntities: true,
       synchronize: true,
       useUnifiedTopology: true,
+      useNewUrlParser: true,
       keepConnectionAlive: true,
     }),
     inject: [GeneralConfig.KEY],
@@ -25,6 +26,7 @@ export const databaseProviders: DynamicModule[] = [
       redis: {
         host: configService.redis_host,
         port: configService.redis_port,
+        password: configService.redis_password,
       },
     }),
     inject: [GeneralConfig.KEY],

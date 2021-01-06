@@ -6,13 +6,13 @@ import { MongoRepository } from 'typeorm';
 import { Observable, of } from 'rxjs';
 import { AxiosResponse } from 'axios';
 import { getQueueToken } from '@nestjs/bull';
+import { ConfigType } from '@nestjs/config';
 import request from 'supertest';
 import nock from 'nock';
 
 import { Order, OrderStatus } from '../src/orders/entities/order.entity';
-import { AppModule } from '../src/app.module';
 import { GeneralConfig } from '../src/configuration.providers';
-import { ConfigType } from '@nestjs/config';
+import { AppModule } from '../src/app.module';
 
 function makeMockTigerResponse<T>(data: T): Observable<AxiosResponse<T>> {
   return of({
@@ -102,7 +102,7 @@ describe('AppController (e2e)', () => {
 
       app = moduleFixture.createNestApplication();
       await app.init();
-    });
+    }, 20000);
 
     afterAll(async () => {
       await ordersRepository.clear();
@@ -200,7 +200,7 @@ describe('AppController (e2e)', () => {
           id: mockOrder.id,
         }),
       });
-    });
+    }, 60000);
   });
 
   describe('nocked /api/orders', () => {
@@ -229,7 +229,7 @@ describe('AppController (e2e)', () => {
 
       app = moduleFixture.createNestApplication();
       await app.init();
-    });
+    }, 20000);
 
     afterAll(async () => {
       nock.restore();
@@ -335,7 +335,7 @@ describe('AppController (e2e)', () => {
           id: mockOrder.id,
         }),
       });
-    });
+    }, 60000);
   });
 
   describe('root', () => {

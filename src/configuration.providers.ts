@@ -7,6 +7,7 @@ export const GeneralConfig = registerAs('general', () => ({
   mongodb_uri: process.env.MONGODB_URI,
   redis_host: process.env.REDIS_HOST,
   redis_port: parseInt(process.env.REDIS_PORT, 10),
+  redis_password: process.env.REDIS_PASSWORD,
 
   partner_api_uri: process.env.PARTNER_API_URI,
   partner_inc_api_key: process.env.PARTNER_INC_API_KEY,
@@ -28,6 +29,7 @@ export const configurationProviders: DynamicModule[] = [
       MONGODB_URI: Joi.string(),
       REDIS_HOST: Joi.string(),
       REDIS_PORT: Joi.number(),
+      REDIS_PASSWORD: Joi.string(),
       PARTNER_API_URI: Joi.string(),
       TIGER_API_URI: Joi.string(),
       PARTNER_INC_API_KEY: Joi.string(),

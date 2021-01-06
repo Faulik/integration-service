@@ -4,6 +4,7 @@ import {
   IsEmail,
   IsArray,
   IsNumber,
+  IsOptional,
   ValidateNested,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
@@ -48,10 +49,12 @@ export class CreateOrderDto {
   @ApiProperty()
   'addressLine1': string;
 
+  @IsOptional()
   @IsString()
   @ApiProperty()
   'addressLine2': string;
 
+  @IsOptional()
   @IsString()
   @ApiProperty()
   'company': string;
