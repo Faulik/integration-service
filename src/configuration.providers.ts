@@ -26,9 +26,9 @@ export const configurationProviders: DynamicModule[] = [
       NODE_ENV: Joi.string()
         .valid('development', 'production', 'test')
         .default('development'),
-      MONGODB_URI: Joi.string(),
-      REDIS_HOST: Joi.string(),
-      REDIS_PORT: Joi.number(),
+      MONGODB_URI: Joi.string().default('mongodb://localhost:27027/dev'),
+      REDIS_HOST: Joi.string().default('localhost'),
+      REDIS_PORT: Joi.number().default('6389'),
       REDIS_PASSWORD: Joi.string(),
       PARTNER_API_URI: Joi.string(),
       TIGER_API_URI: Joi.string(),
