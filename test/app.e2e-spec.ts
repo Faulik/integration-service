@@ -6,11 +6,13 @@ import { MongoRepository } from 'typeorm';
 import { Observable, of } from 'rxjs';
 import { AxiosResponse } from 'axios';
 import { getQueueToken } from '@nestjs/bull';
-import * as request from 'supertest';
+import request from 'supertest';
+import nock from 'nock';
 
-import { OrdersProcessingModule } from '../src/orders/orders-processing.module';
-import { AppModule } from '../src/app.module';
 import { Order, OrderStatus } from '../src/orders/entities/order.entity';
+import { AppModule } from '../src/app.module';
+import { GeneralConfig } from '../src/configuration.providers';
+import { ConfigType } from '@nestjs/config';
 
 function makeMockTigerResponse<T>(data: T): Observable<AxiosResponse<T>> {
   return of({
@@ -70,10 +72,12 @@ describe('AppController (e2e)', () => {
 
   describe('/api/orders', () => {
     let mockHttpService: HttpService;
+    let generalConfig: ConfigType<typeof GeneralConfig>;
 
     let moduleFixture: TestingModule;
     let ordersRepository: MongoRepository<Order>;
-    let queue: Queue;
+    let checkQueue: Queue;
+    let deliveryQueue: Queue;
 
     beforeAll(async () => {
       mockHttpService = new HttpService();
@@ -89,10 +93,33 @@ describe('AppController (e2e)', () => {
         getRepositoryToken(Order),
       );
 
-      queue = moduleFixture.get<Queue>(getQueueToken('statusChecks'));
+      generalConfig = moduleFixture.get<ConfigType<typeof GeneralConfig>>(
+        GeneralConfig.KEY,
+      );
+
+      checkQueue = moduleFixture.get<Queue>(getQueueToken('orderChecks'));
+      deliveryQueue = moduleFixture.get<Queue>(getQueueToken('orderDelivery'));
 
       app = moduleFixture.createNestApplication();
       await app.init();
+    });
+
+    afterAll(async () => {
+      await ordersRepository.clear();
+      await Promise.all(
+        ([
+          'completed',
+          'wait',
+          'active',
+          'delayed',
+          'failed',
+          'paused',
+        ] as JobStatusClean[]).flatMap((status) => [
+          checkQueue.clean(0, status),
+          deliveryQueue.clean(0, status),
+        ]),
+      );
+      await app.close();
     });
 
     it('successful order flow', async () => {
@@ -121,7 +148,10 @@ describe('AppController (e2e)', () => {
         makeMockTigerResponse(undefined),
       );
 
-      await req.post('/api/orders').send(mockOrder);
+      await req
+        .post('/api/orders')
+        .set('x-api-key', generalConfig.partner_inc_api_key)
+        .send(mockOrder);
 
       const orders = await ordersRepository.find();
       expect(orders.length).toEqual(1);
@@ -138,27 +168,73 @@ describe('AppController (e2e)', () => {
         expect.objectContaining({ OrderID: String(mockOrder.id) }),
       );
 
-      expect(await queue.count()).toEqual(1);
-      await runCheckJob(queue);
-      await runCheckJob(queue);
-      await runCheckJob(queue);
-      expect(await queue.count()).toEqual(0);
+      expect(await checkQueue.count()).toEqual(1);
+      await runCheckJob(checkQueue);
+      await runCheckJob(checkQueue);
+      await runCheckJob(checkQueue);
+      expect(await checkQueue.count()).toEqual(0);
 
       expect(tigerHttpServiceGet).toHaveBeenCalledTimes(3);
       expect(tigerHttpServiceGet).toHaveBeenCalledWith(
-        `api/orders/${mockOrder.id}/state`,
+        `${generalConfig.tiger_api_uri}/api/orders/${mockOrder.id}/state`,
+        expect.any(Object),
       );
+
+      await deliveryQueue.whenCurrentJobsFinished();
 
       expect(partnerHttpServicePatch).toHaveBeenCalledTimes(1);
       expect(partnerHttpServicePatch).toHaveBeenCalledWith(
-        `api/orders/${mockOrder.id}`,
+        `${generalConfig.partner_api_uri}/api/orders/${mockOrder.id}`,
         {
           state: 'finished',
         },
+        expect.any(Object),
       );
+
+      const finishedOrders = await ordersRepository.find();
+      expect(finishedOrders.length).toEqual(1);
+
+      expect(finishedOrders[0]).toMatchObject({
+        status: OrderStatus.delivered,
+        order: expect.objectContaining({
+          id: mockOrder.id,
+        }),
+      });
+    });
+  });
+
+  describe('nocked /api/orders', () => {
+    let generalConfig: ConfigType<typeof GeneralConfig>;
+
+    let moduleFixture: TestingModule;
+    let ordersRepository: MongoRepository<Order>;
+    let checkQueue: Queue;
+    let deliveryQueue: Queue;
+
+    beforeAll(async () => {
+      moduleFixture = await Test.createTestingModule({
+        imports: [AppModule],
+      }).compile();
+
+      ordersRepository = moduleFixture.get<MongoRepository<Order>>(
+        getRepositoryToken(Order),
+      );
+
+      generalConfig = moduleFixture.get<ConfigType<typeof GeneralConfig>>(
+        GeneralConfig.KEY,
+      );
+
+      checkQueue = moduleFixture.get<Queue>(getQueueToken('orderChecks'));
+      deliveryQueue = moduleFixture.get<Queue>(getQueueToken('orderDelivery'));
+
+      app = moduleFixture.createNestApplication();
+      await app.init();
     });
 
     afterAll(async () => {
+      nock.restore();
+      nock.cleanAll();
+
       await ordersRepository.clear();
       await Promise.all(
         ([
@@ -168,9 +244,97 @@ describe('AppController (e2e)', () => {
           'delayed',
           'failed',
           'paused',
-        ] as JobStatusClean[]).map((status) => queue.clean(0, status)),
+        ] as JobStatusClean[]).flatMap((status) => [
+          checkQueue.clean(0, status),
+          deliveryQueue.clean(0, status),
+        ]),
       );
       await app.close();
+    });
+
+    it('successful order flow', async () => {
+      const req = request(app.getHttpServer());
+
+      const mockOrder = makeMockOrder();
+
+      const orderStatuses = ['Pending', 'InProduction', 'Finished'];
+      const tigerServerScope = nock(generalConfig.tiger_api_uri)
+        .post('/api/orders', (body) => body.OrderID === String(mockOrder.id))
+        .once()
+        .basicAuth({
+          user: generalConfig.tiger_api_username,
+          pass: generalConfig.tiger_api_password,
+        })
+        .reply(200)
+        .get(/api\/orders\/[0-9]+\/state/)
+        .basicAuth({
+          user: generalConfig.tiger_api_username,
+          pass: generalConfig.tiger_api_password,
+        })
+        .times(3)
+        .reply(200, () => {
+          return {
+            OrderID: String(mockOrder.id),
+            Reason: 1,
+            State: orderStatuses.splice(0, 1)[0],
+          };
+        });
+
+      const partnerServerScope = nock(generalConfig.partner_api_uri)
+        .patch(/api\/orders\/[0-9]+/)
+        .once()
+        .reply(200);
+
+      const response = await req
+        .post('/api/orders')
+        .set('x-api-key', generalConfig.partner_inc_api_key)
+        .send(mockOrder);
+
+      expect(response.status).toEqual(200);
+
+      const orders = await ordersRepository.find();
+      expect(orders.length).toEqual(1);
+      expect(orders[0]).toMatchObject({
+        status: OrderStatus.new,
+        order: expect.objectContaining({
+          id: mockOrder.id,
+        }),
+      });
+      await deliveryQueue.pause();
+
+      expect(await checkQueue.count()).toEqual(1);
+      await runCheckJob(checkQueue);
+      await runCheckJob(checkQueue);
+      await runCheckJob(checkQueue);
+      expect(await checkQueue.count()).toEqual(0);
+
+      expect(await deliveryQueue.count()).toEqual(1);
+
+      expect(tigerServerScope.isDone()).toEqual(true);
+      const finishedOrders = await ordersRepository.find();
+      expect(finishedOrders.length).toEqual(1);
+      expect(finishedOrders[0]).toMatchObject({
+        status: OrderStatus.done,
+        order: expect.objectContaining({
+          id: mockOrder.id,
+        }),
+      });
+
+      await deliveryQueue.resume();
+      expect(await deliveryQueue.count()).toEqual(0);
+
+      await deliveryQueue.whenCurrentJobsFinished();
+
+      expect(partnerServerScope.isDone()).toEqual(true);
+
+      const deliveredOrders = await ordersRepository.find();
+      expect(deliveredOrders.length).toEqual(1);
+      expect(deliveredOrders[0]).toMatchObject({
+        status: OrderStatus.delivered,
+        order: expect.objectContaining({
+          id: mockOrder.id,
+        }),
+      });
     });
   });
 

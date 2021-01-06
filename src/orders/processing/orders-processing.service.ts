@@ -12,7 +12,8 @@ import { CreateOrderDto } from '../../api/orders/dto/create-order.dto';
 @Injectable()
 export class OrdersProcessingService {
   constructor(
-    @InjectQueue('statusChecks') private statusChecksQueue: Queue,
+    @InjectQueue('orderChecks') private orderChecksQueue: Queue,
+    @InjectQueue('orderDelivery') private orderDeliveryQueue: Queue,
 
     @InjectRepository(Order)
     private ordersRepository: MongoRepository<Order>,
@@ -29,32 +30,69 @@ export class OrdersProcessingService {
       order: newOrder,
     });
 
-    if (result.ok) {
-      await this.tigerOrderService.issueNewOrder(newOrder);
-
-      await this.statusChecksQueue.add(
-        {
-          orderId: newOrder.id,
-        },
-        {
-          delay: 1000 * 60 * 2,
-          repeat: {
-            every: 1000 * 60 * 2,
-          },
-          removeOnComplete: true,
-          jobId: `order_${newOrder.id}`,
-        },
-      );
+    if (!result.ok) {
+      throw new Error('Failed to save order');
     }
+
+    await this.tigerOrderService.issueNewOrder(newOrder);
+
+    await this.orderChecksQueue.add(
+      {
+        orderId: newOrder.id,
+      },
+      {
+        delay: 1000 * 60 * 2,
+        repeat: {
+          every: 1000 * 60 * 2,
+        },
+        removeOnComplete: true,
+        jobId: `order_${newOrder.id}`,
+      },
+    );
 
     return true;
   }
 
+  async checkOrderStatus(orderId: string) {
+    const { data } = await this.tigerOrderService.checkOrderStatus(orderId);
+
+    return data;
+  }
+
   async submitFinishedOrder(orderId: string) {
-    await this.statusChecksQueue.removeRepeatable({
+    await this.orderChecksQueue.removeRepeatable({
       every: 1000 * 60 * 2,
       jobId: `order_${orderId}`,
     });
+
+    await this.orderDeliveryQueue.add({
+      orderId: orderId,
+    });
+
+    await this.ordersRepository.updateOne(
+      {
+        'order.id': orderId,
+      },
+      {
+        $set: {
+          status: OrderStatus.done,
+        },
+      },
+    );
+  }
+
+  async submitDeliveredOrder(orderId: string) {
     await this.partnerOrdersService.updateOrderStatus(orderId, 'finished');
+
+    await this.ordersRepository.updateOne(
+      {
+        'order.id': orderId,
+      },
+      {
+        $set: {
+          status: OrderStatus.delivered,
+        },
+      },
+    );
   }
 }

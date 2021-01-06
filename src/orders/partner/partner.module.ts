@@ -1,15 +1,19 @@
 import { HttpModule, Module } from '@nestjs/common';
-import { PartnerOrdersService } from './orders/partner-orders.service';
 import { ConfigType } from '@nestjs/config';
-import { generalConfig } from '../../configuration.providers';
+
+import { PartnerOrdersService } from './orders/partner-orders.service';
+import { GeneralConfig } from '../../configuration.providers';
 
 @Module({
   imports: [
     HttpModule.registerAsync({
-      useFactory: (configService: ConfigType<typeof generalConfig>) => ({
+      useFactory: (configService: ConfigType<typeof GeneralConfig>) => ({
         baseURL: configService.partner_api_uri,
+        headers: {
+          'X-API-KEY': configService.partner_out_api_key,
+        },
       }),
-      inject: [generalConfig.KEY],
+      inject: [GeneralConfig.KEY],
     }),
   ],
   providers: [PartnerOrdersService],

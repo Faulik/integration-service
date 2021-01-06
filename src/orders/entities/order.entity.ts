@@ -64,6 +64,7 @@ export enum OrderStatus {
   new = 'new',
   done = 'done',
   failed = 'failed',
+  delivered = 'delivered',
 }
 
 @Entity()
