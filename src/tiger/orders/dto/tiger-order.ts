@@ -66,7 +66,7 @@ class TigerOrderProduct {
 
 export class TigerOrderDto {
   @IsString()
-  'OrderID': string; // required
+  OrderID: string; // required
 
   @IsBoolean()
   'InvoiceSendLater': boolean;

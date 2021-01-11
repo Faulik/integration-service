@@ -105,7 +105,7 @@ export class OrdersProcessingService {
     this.logger.log('Submitting order back to partner', `orderId: ${orderId}`);
 
     try {
-      await this.partnerOrdersService.updateOrderStatus(orderId, 'finished');
+      await this.partnerOrdersService.updateOrderStatus(orderId, 'Finished');
     } catch (e) {
       await this.flagOrderAsFailed(orderId);
       throw e;
